@@ -18,4 +18,12 @@ Production images are published by GitHub Actions to GitHub Container Registry.
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the server, secrets, HTTPS, update, and
 backup procedure.
 
+## Temporary GitHub Codespaces test
+
+Create repository-scoped Codespaces secrets named `GOOGLE_API_KEY` and
+`APP_PASSWORD`, then choose **Code → Codespaces → Create codespace**. The
+containers start automatically and port 5000 appears in the **PORTS** tab. It is
+private by default and requires the username `energy-admin` plus the password in
+the `APP_PASSWORD` secret.
+
 Secrets and generated runtime results are intentionally excluded from Git.
