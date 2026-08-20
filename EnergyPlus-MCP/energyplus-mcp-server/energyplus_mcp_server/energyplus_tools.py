@@ -11,6 +11,7 @@ See License.txt in the parent directory for license details.
 
 import os
 import csv
+import html as html_lib
 import json
 import logging
 import re
@@ -502,15 +503,25 @@ class EnergyPlusManager:
             
             # Check for materials referenced in constructions
             constructions = idf.idfobjects.get("Construction", [])
-            materials = list(idf.idfobjects.get("Material", [])) + list(idf.idfobjects.get("Material:NoMass", []))
-            material_names = {getattr(mat, 'Name', '') for mat in materials}
+            # EnergyPlus constructions may reference opaque, air-gap, roof,
+            # infrared, or window material families. Names are case-insensitive.
+            material_types = [
+                "Material", "Material:NoMass", "Material:AirGap",
+                "Material:InfraredTransparent", "Material:RoofVegetation",
+                "WindowMaterial:SimpleGlazingSystem", "WindowMaterial:Glazing",
+                "WindowMaterial:Gas", "WindowMaterial:GasMixture", "WindowMaterial:Gap",
+                "WindowMaterial:Shade", "WindowMaterial:Blind", "WindowMaterial:Screen",
+                "WindowMaterial:ComplexShade", "WindowMaterial:EquivalentLayer",
+            ]
+            materials = [obj for kind in material_types for obj in idf.idfobjects.get(kind, [])]
+            material_names = {str(getattr(mat, 'Name', '')).strip().upper() for mat in materials}
             
             for construction in constructions:
                 # Check all layers in construction
                 for i in range(1, 10):  # EnergyPlus supports up to 10 layers
                     layer_attr = f"Layer_{i}" if i > 1 else "Outside_Layer"
                     layer_name = getattr(construction, layer_attr, None)
-                    if layer_name and layer_name not in material_names:
+                    if layer_name and str(layer_name).strip().upper() not in material_names:
                         errors.append(f"Construction '{getattr(construction, 'Name', 'Unknown')}' references undefined material: {layer_name}")
             
             # Set validation status
@@ -2813,25 +2824,46 @@ class EnergyPlusManager:
         if not output_dir.is_dir():
             raise FileNotFoundError(f"Output directory not found: {output_directory}")
         table_files = sorted(output_dir.glob("*Table.csv"))
-        if not table_files:
-            raise FileNotFoundError(f"No *Table.csv summary report found in {output_directory}")
+        html_table_files = sorted(output_dir.glob("*Table.htm")) + sorted(output_dir.glob("*Table.html"))
+        if not table_files and not html_table_files:
+            raise FileNotFoundError(f"No *Table.csv or *Table.htm summary report found in {output_directory}")
 
         metrics: Dict[str, Optional[float]] = {
             "total_site_energy_gj": None, "net_site_energy_gj": None,
             "total_source_energy_gj": None, "total_building_area_m2": None,
             "conditioned_building_area_m2": None,
         }
-        with table_files[0].open("r", encoding="utf-8-sig", errors="replace", newline="") as stream:
-            for row in csv.reader(stream):
-                values = [cell.strip() for cell in row]
-                label = values[1] if len(values) > 1 else ""
+        summary_file = table_files[0] if table_files else html_table_files[0]
+        if table_files:
+            with table_files[0].open("r", encoding="utf-8-sig", errors="replace", newline="") as stream:
+                rows = ([cell.strip() for cell in row] for row in csv.reader(stream))
+                label_values = ((values[1] if len(values) > 1 else "", values[2] if len(values) > 2 else "") for values in rows)
+                for label, raw_value in label_values:
+                    try:
+                        if label == "Total Site Energy": metrics["total_site_energy_gj"] = float(raw_value)
+                        elif label == "Net Site Energy": metrics["net_site_energy_gj"] = float(raw_value)
+                        elif label == "Total Source Energy": metrics["total_source_energy_gj"] = float(raw_value)
+                        elif label == "Total Building Area": metrics["total_building_area_m2"] = float(raw_value)
+                        elif label == "Net Conditioned Building Area": metrics["conditioned_building_area_m2"] = float(raw_value)
+                    except ValueError:
+                        continue
+        else:
+            # EnergyPlus HTML reports use simple <tr>/<td> tables. This fallback
+            # avoids forcing users to modify otherwise valid IDFs solely to emit CSV.
+            content = html_table_files[0].read_text(encoding="utf-8", errors="replace")
+            for row_html in re.findall(r"<tr\b[^>]*>(.*?)</tr>", content, re.I | re.S):
+                cells = [html_lib.unescape(re.sub(r"<[^>]+>", "", cell)).strip()
+                         for cell in re.findall(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", row_html, re.I | re.S)]
+                if len(cells) < 2:
+                    continue
+                label, raw_value = cells[0], cells[1].replace(",", "")
                 try:
-                    if label == "Total Site Energy": metrics["total_site_energy_gj"] = float(values[2])
-                    elif label == "Net Site Energy": metrics["net_site_energy_gj"] = float(values[2])
-                    elif label == "Total Source Energy": metrics["total_source_energy_gj"] = float(values[2])
-                    elif label == "Total Building Area": metrics["total_building_area_m2"] = float(values[2])
-                    elif label == "Net Conditioned Building Area": metrics["conditioned_building_area_m2"] = float(values[2])
-                except (ValueError, IndexError):
+                    if label == "Total Site Energy": metrics["total_site_energy_gj"] = float(raw_value)
+                    elif label == "Net Site Energy": metrics["net_site_energy_gj"] = float(raw_value)
+                    elif label == "Total Source Energy": metrics["total_source_energy_gj"] = float(raw_value)
+                    elif label == "Total Building Area": metrics["total_building_area_m2"] = float(raw_value)
+                    elif label == "Net Conditioned Building Area": metrics["conditioned_building_area_m2"] = float(raw_value)
+                except ValueError:
                     continue
 
         site_gj, total_area = metrics["total_site_energy_gj"], metrics["total_building_area_m2"]
@@ -2850,7 +2882,7 @@ class EnergyPlusManager:
                 diagnostics["warnings"], diagnostics["severe_errors"] = int(match.group(1)), int(match.group(2))
 
         return {
-            "output_directory": str(output_dir), "summary_file": str(table_files[0]),
+            "output_directory": str(output_dir), "summary_file": str(summary_file),
             "error_file": str(error_files[0]) if error_files else None,
             "metrics": metrics, "diagnostics": diagnostics,
             "interpretation_note": "EUI/EPI uses total site energy divided by floor area. Conditioned-area EUI is null when conditioned area is zero.",
