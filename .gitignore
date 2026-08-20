@@ -1,0 +1,32 @@
+# Virtual environment
+venv/
+
+# Environment variables (contains API keys)
+.env
+.env.production
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/*
+!.vscode/mcp.json
+*.code-workspace
+runtime/
+deploy-data/
+EnergyPlus-MCP/energyplus-mcp-server/outputs/
+EnergyPlus-MCP/energyplus-mcp-server/logs/
+EnergyPlus-MCP/energyplus-mcp-server/simulation_output/
+EnergyPlus-MCP/energyplus-mcp-server/.pytest_cache/
+EnergyPlus-MCP/energyplus-mcp-server/illustrative examples/*/
+EnergyPlus-MCP/energyplus-mcp-server/illustrative examples/*.png
+*.sqlite
+*.sqlite3
+*.db
+.pytest_cache/
+
+# OS
+.Trash-*
+*~

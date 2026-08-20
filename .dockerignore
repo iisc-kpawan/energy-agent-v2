@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+runtime
+*.log
+EnergyPlus-MCP/energyplus-mcp-server/logs
+EnergyPlus-MCP/energyplus-mcp-server/outputs
+EnergyPlus-MCP/energyplus-mcp-server/simulation_output
+EnergyPlus-MCP/energyplus-mcp-server/.pytest_cache
+tests
+*.jpg
+*.png

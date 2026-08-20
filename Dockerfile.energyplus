@@ -1,0 +1,29 @@
+FROM python:3.12-slim
+
+ARG TARGETARCH
+ARG EPLUS_VER=26.1.0
+ARG EPLUS_HASH=6f2e40d102
+ARG EPLUS_PREFIX=/opt/energyplus
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget ca-certificates graphviz libx11-6 libxext6 libxrender1 libxtst6 \
+    libxi6 libxrandr2 libxinerama1 libxcursor1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    case "$TARGETARCH" in amd64) EPLUS_ARCH=x86_64 ;; arm64) EPLUS_ARCH=arm64 ;; *) exit 1 ;; esac; \
+    mkdir -p "$EPLUS_PREFIX"; \
+    wget -q "https://github.com/NREL/EnergyPlus/releases/download/v${EPLUS_VER}/EnergyPlus-${EPLUS_VER}-${EPLUS_HASH}-Linux-Ubuntu24.04-${EPLUS_ARCH}.tar.gz" -O /tmp/eplus.tgz; \
+    tar -xzf /tmp/eplus.tgz -C "$EPLUS_PREFIX" --strip-components=1; \
+    ln -s "$EPLUS_PREFIX/energyplus" /usr/local/bin/energyplus; \
+    rm /tmp/eplus.tgz
+
+ENV PATH="/opt/energyplus:${PATH}" EPLUS_IDD_PATH=/opt/energyplus/Energy+.idd \
+    UV_PROJECT_ENVIRONMENT=/opt/eplus-venv UV_LINK_MODE=copy
+RUN pip install --no-cache-dir uv
+WORKDIR /workspace/energyplus-mcp-server
+COPY EnergyPlus-MCP/energyplus-mcp-server/pyproject.toml EnergyPlus-MCP/energyplus-mcp-server/uv.lock ./
+RUN uv sync --frozen --no-dev
+COPY EnergyPlus-MCP/energyplus-mcp-server/ ./
+EXPOSE 8000
+CMD ["uv", "run", "--no-dev", "python", "-m", "energyplus_mcp_server.server"]

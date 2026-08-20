@@ -1,0 +1,66 @@
+services:
+  energyplus:
+    image: ghcr.io/iisc-kpawan/energy-agent-v2-energyplus:${IMAGE_TAG:-latest}
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_HTTP_PORT: "8000"
+      MCP_TOKENS: '[{"label":"app","token":"${MCP_TOKEN}"}]'
+    volumes:
+      - simulations:/workspace/energyplus-mcp-server/outputs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;s=socket.create_connection(('127.0.0.1',8000),5);s.close()"]
+      interval: 20s
+      timeout: 8s
+      retries: 10
+
+  app:
+    image: ghcr.io/iisc-kpawan/energy-agent-v2-app:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "5000"
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
+      ENERGYPLUS_MCP_URL: http://energyplus:8000/mcp
+      ENERGYPLUS_MCP_TOKEN: ${MCP_TOKEN}
+      ENERGY_AGENT_DATA_DIR: /app/runtime
+      APP_USERNAME: ${APP_USERNAME:-energy-admin}
+      APP_PASSWORD: ${APP_PASSWORD}
+      CORS_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost}
+      MEMORY_RECENT_TURNS: ${MEMORY_RECENT_TURNS:-12}
+      MEMORY_SUMMARY_CHARS: ${MEMORY_SUMMARY_CHARS:-10000}
+      MAX_PARALLEL_AGENTS: ${MAX_PARALLEL_AGENTS:-4}
+    volumes:
+      - app_data:/app/runtime
+      - simulations:/workspace/energyplus-mcp-server/outputs:ro
+    depends_on:
+      energyplus:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:5000/api/health',timeout=5)"]
+      interval: 20s
+      timeout: 8s
+      retries: 10
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-:80}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  app_data:
+  simulations:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,6 @@
+# Optional: install in the EnergyPlus worker for real BESOS-backed optimization.
+besos
+platypus-opt
+pandas
+matplotlib
+dask[distributed]

@@ -1,0 +1,42 @@
+services:
+  energyplus:
+    image: energyplus-mcp-dev
+    user: root
+    working_dir: /workspace/energyplus-mcp-server
+    command: ["uv", "run", "--no-dev", "python", "-m", "energyplus_mcp_server.server"]
+    environment:
+      UV_PROJECT_ENVIRONMENT: /opt/eplus-venv
+      UV_LINK_MODE: copy
+      MCP_TRANSPORT: streamable-http
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_HTTP_PORT: "8000"
+      MCP_TOKENS: '[{"label":"app","token":"${MCP_TOKEN}"}]'
+    volumes:
+      - ./EnergyPlus-MCP:/workspace
+      - energyplus-mcp-deps:/root/.cache/uv
+      - energyplus-mcp-venv:/opt/eplus-venv
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./runtime:/app/runtime
+      - ./EnergyPlus-MCP:/workspace:ro
+    environment:
+      PORT: "5000"
+      ENERGYPLUS_MCP_URL: http://energyplus:8000/mcp
+      ENERGYPLUS_MCP_TOKEN: ${MCP_TOKEN}
+    depends_on:
+      - energyplus
+    restart: unless-stopped
+
+volumes:
+  energyplus-mcp-deps:
+    external: true
+  energyplus-mcp-venv:
+    external: true
