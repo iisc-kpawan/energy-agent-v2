@@ -26,6 +26,11 @@ from .config import Settings
 from .memory import ContextBuilder
 from .orchestrator import MultiAgentOrchestrator, SPECIALISTS
 from .analysis import analysis_tools, calibration_metrics, guideline14_assessment, demo_optimization, demo_calibration, demo_sensitivity, export_result
+from .calibration.jobs import CalibrationJobManager
+from .calibration.occupancy import OccupancyCalibrationRequest
+from .calibration.tools import calibration_tools
+from .engineering_studies import EngineeringStudyManager, EnergyPlusStudyRequest, engineering_study_tools
+from .simulation.runner import EnergyPlusRunner
 from .storage import Store
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -41,6 +46,8 @@ mcp_client = None
 orchestrator: MultiAgentOrchestrator | None = None
 init_status, init_error = "pending", ""
 chat_jobs: dict[str, dict] = {}
+calibration_job_manager: CalibrationJobManager | None = None
+engineering_study_manager: EngineeringStudyManager | None = None
 
 
 def _patch_array_items(node):
@@ -95,7 +102,7 @@ def docker_command() -> str:
 
 
 async def initialize_mcp():
-    global mcp_client, orchestrator, init_status, init_error
+    global mcp_client, orchestrator, calibration_job_manager, engineering_study_manager, init_status, init_error
     init_status = "connecting"
     try:
         mcp_url = os.getenv("ENERGYPLUS_MCP_URL", "").strip()
@@ -129,7 +136,14 @@ async def initialize_mcp():
                 await asyncio.sleep(2)
         else:
             raise RuntimeError(f"EnergyPlus MCP did not become ready: {last_error}")
-        tools = _fix_tool_schemas(mcp_tools + analysis_tools())
+        allowed_roots = [ROOT, settings.artifacts_dir, ROOT / "EnergyPlus-MCP" / "energyplus-mcp-server"]
+        output_root = os.getenv("ENERGYPLUS_OUTPUT_ROOT", "").strip()
+        if output_root: allowed_roots.append(Path(output_root))
+        runner = EnergyPlusRunner(mcp_tools, allowed_roots)
+        calibration_job_manager = CalibrationJobManager(settings.data_dir / "calibration_jobs", runner)
+        engineering_study_manager = EngineeringStudyManager(settings.data_dir / "engineering_studies", runner)
+        tools = _fix_tool_schemas(mcp_tools + analysis_tools() + calibration_tools(calibration_job_manager)
+                                  + engineering_study_tools(engineering_study_manager))
         orchestrator = MultiAgentOrchestrator(tools, memory, store, settings.google_api_key,
                                                settings.default_model, settings.max_parallel_agents)
         init_status = "ready"
@@ -190,7 +204,9 @@ async def health():
 @app.get("/api/v2/capabilities")
 async def v2_capabilities():
     return {"version": "2.0.0", "modes": ["direct", "multi-agent"],
-            "analysis": ["parametric sampling", "multi-objective Pareto optimization", "calibration", "NMBE", "CV(RMSE)", "elementary-effects sensitivity screening"],
+            "analysis": ["real EnergyPlus occupancy calibration", "real EnergyPlus lighting optimization",
+                         "real EnergyPlus lighting/occupancy sensitivity", "deterministic calibration metrics",
+                         "surrogate optimization demo", "surrogate calibration demo", "surrogate sensitivity demo"],
             "guardrails": {"max_demo_evaluations": 500, "seeded_reproducibility": True,
                            "human_approval_for_real_high-budget_runs": True},
             "sources": ["https://besos.readthedocs.io/en/stable/example-notebooks/How-to-Guides/BuildingOptimization.html",
@@ -309,7 +325,7 @@ async def delete_conversation(conversation_id: str):
 async def upload(project_id: str, file: UploadFile = File(...), label: str = Form("Uploaded model")):
     store.get_project(project_id)
     suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in {".idf", ".epw"}: raise HTTPException(400, "Only .idf and .epw files are accepted")
+    if suffix not in {".idf", ".epw", ".csv"}: raise HTTPException(400, "Only .idf, .epw, and measured .csv files are accepted")
     incoming = settings.data_dir / "incoming"
     incoming.mkdir(exist_ok=True)
     temp = incoming / f"upload-{os.urandom(8).hex()}{suffix}"
@@ -321,10 +337,91 @@ async def upload(project_id: str, file: UploadFile = File(...), label: str = For
                 temp.unlink(missing_ok=True); raise HTTPException(413, "File exceeds 100 MB")
             output.write(chunk)
     try:
-        artifact = store.import_artifact(project_id, temp, suffix[1:], {"original_name": file.filename})
+        artifact_type = "measured_csv" if suffix == ".csv" else suffix[1:]
+        artifact = store.import_artifact(project_id, temp, artifact_type, {"original_name": file.filename, "label": label})
         version = store.create_model_version(project_id, artifact["id"], label) if suffix == ".idf" else None
         return {"artifact": artifact, "model_version": version}
     finally: temp.unlink(missing_ok=True)
+
+
+@app.get("/api/projects/{project_id}/artifacts")
+async def project_artifacts(project_id: str):
+    return {"artifacts": store.list_artifacts(project_id)}
+
+
+@app.post("/api/v2/calibration/occupancy")
+async def start_occupancy_calibration(request: Request):
+    if not calibration_job_manager: raise HTTPException(503, init_error or "Calibration service is connecting")
+    body = await request.json()
+    try:
+        specification = OccupancyCalibrationRequest(**body)
+        return await calibration_job_manager.start(specification)
+    except (TypeError, ValueError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/v2/calibration/jobs/{job_id}")
+async def calibration_job(job_id: str):
+    if not calibration_job_manager: raise HTTPException(503, "Calibration service is unavailable")
+    try: return calibration_job_manager.status(job_id)
+    except KeyError as exc: raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/v2/calibration/jobs/{job_id}/files")
+async def calibration_job_files(job_id: str):
+    if not calibration_job_manager: raise HTTPException(503, "Calibration service is unavailable")
+    try:
+        files = calibration_job_manager.files(job_id)
+        for item in files:
+            item["url"] = f"/api/v2/calibration/jobs/{job_id}/files/{item['name']}"
+        return {"job_id": job_id, "files": files}
+    except KeyError as exc: raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/v2/calibration/jobs/{job_id}/files/{file_path:path}")
+async def calibration_job_file(job_id: str, file_path: str):
+    if not calibration_job_manager: raise HTTPException(503, "Calibration service is unavailable")
+    try:
+        target = calibration_job_manager.file(job_id, file_path)
+        return FileResponse(target, filename=target.name)
+    except KeyError as exc: raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/v2/studies/{kind}")
+async def start_energyplus_study(kind: str, request: Request):
+    if kind not in {"optimization", "sensitivity"}: raise HTTPException(404, "Unknown study type")
+    if not engineering_study_manager: raise HTTPException(503, init_error or "Engineering study service is connecting")
+    try:
+        specification = EnergyPlusStudyRequest(**await request.json())
+        return await engineering_study_manager.start(kind, specification)
+    except (TypeError, ValueError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/v2/studies/jobs/{job_id}")
+async def energyplus_study_job(job_id: str):
+    if not engineering_study_manager: raise HTTPException(503, "Engineering study service is unavailable")
+    try: return engineering_study_manager.status(job_id)
+    except KeyError as exc: raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/v2/studies/jobs/{job_id}/files")
+async def energyplus_study_files(job_id: str):
+    if not engineering_study_manager: raise HTTPException(503, "Engineering study service is unavailable")
+    try:
+        files = engineering_study_manager.files(job_id)
+        for item in files: item["url"] = f"/api/v2/studies/jobs/{job_id}/files/{item['name']}"
+        return {"job_id": job_id, "files": files}
+    except KeyError as exc: raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/v2/studies/jobs/{job_id}/files/{file_path:path}")
+async def energyplus_study_file(job_id: str, file_path: str):
+    if not engineering_study_manager: raise HTTPException(503, "Engineering study service is unavailable")
+    try:
+        target = engineering_study_manager.file(job_id, file_path)
+        return FileResponse(target, filename=target.name)
+    except KeyError as exc: raise HTTPException(404, str(exc)) from exc
 
 
 @app.post("/api/chat")
@@ -399,10 +496,13 @@ def _run_output_directory(run_id: str) -> Path:
             raw = (call.get("args") or {}).get("output_directory")
             if raw and "/outputs/" in raw:
                 candidate = Path(raw)
-                if str(candidate).startswith("/workspace/"):
-                    resolved = candidate.resolve()
-                    root = Path("/workspace/energyplus-mcp-server/outputs").resolve()
-                    if resolved.is_dir() and (resolved == root or root in resolved.parents): return resolved
+                resolved = candidate.resolve()
+                root = Path(os.getenv(
+                    "ENERGYPLUS_OUTPUT_ROOT",
+                    "/workspace/energyplus-mcp-server/outputs",
+                )).resolve()
+                if resolved.is_dir() and (resolved == root or root in resolved.parents):
+                    return resolved
     raise HTTPException(404, "No completed simulation output is attached to this run")
 
 

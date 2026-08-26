@@ -41,15 +41,23 @@ class EnergyPlusConfig:
 @dataclass
 class PathConfig:
     """Path configuration"""
-    workspace_root: str = "/workspace/energyplus-mcp-server"
+    workspace_root: str = field(default_factory=lambda: os.getenv(
+        "MCP_WORKSPACE_ROOT", "/workspace/energyplus-mcp-server"
+    ))
     sample_files_path: str = ""
-    temp_dir: str = "/tmp"
-    output_dir: str = "/workspace/energyplus-mcp-server/outputs"
+    temp_dir: str = field(default_factory=lambda: os.getenv("MCP_TEMP_DIR", "/tmp"))
+    output_dir: str = ""
     
     def __post_init__(self):
         """Set default paths after initialization"""
         if not self.sample_files_path:
-            self.sample_files_path = os.path.join(self.workspace_root, "sample_files")
+            self.sample_files_path = os.getenv(
+                "MCP_SAMPLE_FILES_PATH", os.path.join(self.workspace_root, "sample_files")
+            )
+        if not self.output_dir:
+            self.output_dir = os.getenv(
+                "MCP_OUTPUT_DIR", os.path.join(self.workspace_root, "outputs")
+            )
 
 
 @dataclass

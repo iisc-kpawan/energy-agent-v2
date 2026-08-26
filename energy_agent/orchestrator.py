@@ -31,9 +31,9 @@ WRITE_TOOLS = {
 SIM_TOOLS = {"run_energyplus_simulation"}
 RESULT_TOOLS = {"calculate_energy_performance", "create_interactive_plot", "visualize_loop_diagram", "get_error_logs"}
 ADMIN_TOOLS = {"clear_logs"}
-OPTIMIZATION_TOOLS = {"run_optimization_demo"}
-CALIBRATION_TOOLS = {"run_calibration_demo", "calculate_calibration_metrics"}
-SENSITIVITY_TOOLS = {"run_sensitivity_demo"}
+OPTIMIZATION_TOOLS = {"run_energyplus_optimization", "get_energyplus_study_job", "run_surrogate_optimization_demo"}
+CALIBRATION_TOOLS = {"calibrate_occupancy", "get_calibration_job", "calculate_calibration_metrics", "run_surrogate_calibration_demo"}
+SENSITIVITY_TOOLS = {"run_energyplus_sensitivity", "get_energyplus_study_job", "run_surrogate_sensitivity_demo"}
 
 # Small intent-specific tool groups keep large JSON schemas out of unrelated prompts.
 TOOL_INTENTS = (
@@ -61,9 +61,12 @@ TOOL_INTENTS = (
     (("add output variable",), {"add_output_variables", "get_output_variables"}),
     (("add output meter",), {"add_output_meters", "get_output_meters"}),
     (("clear logs", "clear server logs"), {"clear_logs"}),
-    (("optimize", "optimise", "optimization", "pareto", "nsga", "objective", "hypervolume"), {"run_optimization_demo"}),
-    (("calibrate", "calibration", "nmbe", "cvrmse", "measured data", "utility bill"), {"run_calibration_demo", "calculate_calibration_metrics"}),
-    (("sensitivity", "morris", "sobol", "parameter screening"), {"run_sensitivity_demo"}),
+    (("calibrate", "calibration", "measured data", "utility bill", "occupancy multiplier"), {"calibrate_occupancy", "get_calibration_job", "calculate_calibration_metrics"}),
+    (("calibration job", "calibration status", "calibration result"), {"get_calibration_job"}),
+    (("optimization", "optimize", "reduce annual electricity"), {"run_energyplus_optimization", "get_energyplus_study_job"}),
+    (("sensitivity", "parameter screening"), {"run_energyplus_sensitivity", "get_energyplus_study_job"}),
+    (("study job", "optimization job", "sensitivity job"), {"get_energyplus_study_job"}),
+    (("demo", "surrogate"), {"run_surrogate_optimization_demo", "run_surrogate_calibration_demo", "run_surrogate_sensitivity_demo"}),
 )
 
 
@@ -121,6 +124,9 @@ Use list_sample_files for ordinary sample discovery. Use list_available_files on
 Honor the exact model and weather file named by the user. Never substitute, pivot to, or test a different model unless the requested file is conclusively absent.
 If you are the Simulation Engineer and run_energyplus_simulation is available, you must execute it for a simulation request and report its exact output directory and runtime.
 If you are the Results Analyst, call calculate_energy_performance only with the completed simulation output directory supplied by a prior report. Never pass an IDF file as output_directory and never run a simulation yourself.
+Real calibration means fixed measured CSV data compared with repeated EnergyPlus outputs. Never use a run_surrogate_* tool unless the user explicitly requests a demo or surrogate workflow.
+The calibrate_occupancy tool starts a persistent background job. Report its job ID and explain that get_calibration_job retrieves progress/results; do not claim calibration is complete when only the job was started.
+Real optimization and sensitivity tools also start persistent jobs. Report the job ID and use get_energyplus_study_job for progress; never describe a queued job as completed evidence.
 When a model path exists in DURABLE PROJECT CONTEXT, use it without asking again.
 For modifications, always create a new output file and never overwrite the source. Return concise findings plus evidence.
 You are a specialist, not the user-facing assistant."""
@@ -150,11 +156,15 @@ You are a specialist, not the user-facing assistant."""
                 x in q for x in ("eui", "epi", "energy performance", "site energy", "source energy", "floor area", "result")
             ) else selected) & specialist.tools
         if specialist.key == "optimization_expert":
-            return OPTIMIZATION_TOOLS & specialist.tools
+            return (({"run_surrogate_optimization_demo"} if any(x in q for x in ("demo", "surrogate"))
+                     else {"run_energyplus_optimization", "get_energyplus_study_job"}) & specialist.tools)
         if specialist.key == "sensitivity_analyst":
-            return SENSITIVITY_TOOLS & specialist.tools
+            return (({"run_surrogate_sensitivity_demo"} if any(x in q for x in ("demo", "surrogate"))
+                     else {"run_energyplus_sensitivity", "get_energyplus_study_job"}) & specialist.tools)
         if specialist.key == "calibration_expert":
-            return CALIBRATION_TOOLS & specialist.tools
+            if any(x in q for x in ("demo", "surrogate")):
+                return {"run_surrogate_calibration_demo", "calculate_calibration_metrics"} & specialist.tools
+            return {"calibrate_occupancy", "get_calibration_job", "calculate_calibration_metrics"} & specialist.tools
         if selected:
             return set(sorted(selected)[:8])
         defaults = {

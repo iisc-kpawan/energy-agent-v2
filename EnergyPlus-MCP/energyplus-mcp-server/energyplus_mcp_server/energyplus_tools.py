@@ -2755,11 +2755,11 @@ class EnergyPlusManager:
                         "timestamp": datetime.now().isoformat()
                     }
                     
-                    logger.error(f"Simulation failed: {str(e)}")
+                    logger.exception(f"Simulation failed: {str(e)}")
                     return json.dumps(simulation_result, indent=2)
                     
             except Exception as e:
-                logger.error(f"Error setting up simulation for {resolved_idf_path}: {e}")
+                logger.exception(f"Error setting up simulation for {resolved_idf_path}: {e}")
                 raise RuntimeError(f"Error running simulation: {str(e)}")
         
 

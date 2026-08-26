@@ -229,18 +229,18 @@ def _export_tool_result(result: dict, prefix: str) -> dict:
     return {kind: f"/api/v2/analysis/files/{Path(path).name}" for kind, path in paths.items()}
 
 
-@tool
+@tool("run_surrogate_optimization_demo")
 def run_optimization_demo(evaluations: int = 30, seed: int = 42) -> str:
-    """Run the bounded V2 multi-objective optimization demonstration and return exact Pareto results."""
+    """DEMO ONLY: run algebraic surrogate optimization. This does not modify or run EnergyPlus."""
     result = demo_optimization(evaluations, seed)
     compact = {k: result[k] for k in ("mode", "algorithm", "evaluation_budget", "pareto_front")}
     compact["artifacts"] = _export_tool_result(result, "optimization-chat")
     return json.dumps(compact)
 
 
-@tool
+@tool("run_surrogate_calibration_demo")
 def run_calibration_demo(evaluations: int = 40, seed: int = 42) -> str:
-    """Run the bounded V2 monthly calibration demonstration and return exact NMBE/CV(RMSE) evidence."""
+    """DEMO ONLY: calibrate hard-coded surrogate arrays. This does not use measured files or EnergyPlus."""
     result = demo_calibration(evaluations, seed)
     compact = {k: result[k] for k in ("mode", "best", "assessment")}
     compact["artifacts"] = _export_tool_result(result, "calibration-chat")
@@ -254,9 +254,9 @@ def calculate_calibration_metrics(measured: list[float], simulated: list[float],
     return json.dumps({"metrics": metrics, "assessment": guideline14_assessment(metrics, interval)})
 
 
-@tool
+@tool("run_surrogate_sensitivity_demo")
 def run_sensitivity_demo(trajectories: int = 8, seed: int = 42) -> str:
-    """Run bounded elementary-effects parameter screening and return an influence ranking."""
+    """DEMO ONLY: screen an algebraic surrogate. This does not modify or run EnergyPlus."""
     result = demo_sensitivity(trajectories, seed); result["artifacts"] = _export_tool_result(result, "sensitivity-chat")
     return json.dumps(result)
 

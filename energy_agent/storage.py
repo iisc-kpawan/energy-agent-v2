@@ -246,6 +246,19 @@ class Store:
         if not row: raise KeyError(f"Artifact not found: {artifact_id}")
         item = dict(row); item["metadata"] = json.loads(item.pop("metadata_json")); return item
 
+    def list_artifacts(self, project_id: str, artifact_type: str | None = None) -> list[dict]:
+        self.get_project(project_id)
+        query, args = "SELECT * FROM artifacts WHERE project_id=?", [project_id]
+        if artifact_type:
+            query += " AND type=?"; args.append(artifact_type)
+        query += " ORDER BY created_at DESC"
+        with self._connect() as db:
+            rows = db.execute(query, args).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row); item["metadata"] = json.loads(item.pop("metadata_json")); items.append(item)
+        return items
+
     def create_model_version(self, project_id: str, artifact_id: str, label: str,
                              parent_id: str | None = None, changes: list | None = None) -> dict:
         artifact = self.get_artifact(artifact_id)
@@ -270,4 +283,7 @@ class Store:
             version = self.get_model_version(project["active_version_id"])
             artifact = self.get_artifact(version["artifact_id"])
             project["active_model"] = {**version, "path": artifact["path"], "sha256": artifact["sha256"]}
+        measured = self.list_artifacts(project_id, "measured_csv")
+        if measured:
+            project["active_measured_data"] = measured[0]
         return project

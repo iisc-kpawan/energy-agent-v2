@@ -32,6 +32,7 @@ class ContextBuilder:
             f"Project: {project['name']} ({project['id']})",
             f"Active model: {active.get('path', 'none')}",
             f"Active version: {active.get('id', 'none')}",
+            f"Active measured data: {project.get('active_measured_data', {}).get('path', 'none')}",
             "Conversation summary:", context.get("summary") or "No older summary yet.",
             "Recent conversation:",
         ]

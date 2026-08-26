@@ -225,7 +225,7 @@ class PeopleManager:
             return result
             
         except Exception as e:
-            logger.error(f"Error modifying People objects: {e}")
+            logger.exception("Error modifying People objects")
             return {
                 "success": False,
                 "error": str(e),
