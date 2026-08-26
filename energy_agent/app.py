@@ -31,6 +31,7 @@ from .calibration.occupancy import OccupancyCalibrationRequest
 from .calibration.tools import calibration_tools
 from .engineering_studies import EngineeringStudyManager, EnergyPlusStudyRequest, engineering_study_tools
 from .simulation.runner import EnergyPlusRunner
+from .self_awareness import self_awareness_tools
 from .storage import Store
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -142,8 +143,14 @@ async def initialize_mcp():
         runner = EnergyPlusRunner(mcp_tools, allowed_roots)
         calibration_job_manager = CalibrationJobManager(settings.data_dir / "calibration_jobs", runner)
         engineering_study_manager = EngineeringStudyManager(settings.data_dir / "engineering_studies", runner)
+        registry: dict[str, list] = {"tools": []}
+        agent_snapshot = [{"id": key, "name": item.name, "purpose": item.purpose, "tools": item.tools}
+                          for key, item in SPECIALISTS.items()]
+        output_path = Path(output_root) if output_root else ROOT / "EnergyPlus-MCP" / "energyplus-mcp-server" / "outputs"
+        awareness = self_awareness_tools(registry, agent_snapshot, ROOT, settings.data_dir, output_path)
         tools = _fix_tool_schemas(mcp_tools + analysis_tools() + calibration_tools(calibration_job_manager)
-                                  + engineering_study_tools(engineering_study_manager))
+                                  + engineering_study_tools(engineering_study_manager) + awareness)
+        registry["tools"] = tools
         orchestrator = MultiAgentOrchestrator(tools, memory, store, settings.google_api_key,
                                                settings.default_model, settings.max_parallel_agents)
         init_status = "ready"

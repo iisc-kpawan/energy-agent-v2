@@ -34,6 +34,7 @@ ADMIN_TOOLS = {"clear_logs"}
 OPTIMIZATION_TOOLS = {"run_energyplus_optimization", "get_energyplus_study_job", "run_surrogate_optimization_demo"}
 CALIBRATION_TOOLS = {"calibrate_occupancy", "get_calibration_job", "calculate_calibration_metrics", "run_surrogate_calibration_demo"}
 SENSITIVITY_TOOLS = {"run_energyplus_sensitivity", "get_energyplus_study_job", "run_surrogate_sensitivity_demo"}
+AWARENESS_TOOLS = {"list_registered_tools", "describe_agent_team", "get_platform_capabilities", "explain_artifact_locations"}
 
 # Small intent-specific tool groups keep large JSON schemas out of unrelated prompts.
 TOOL_INTENTS = (
@@ -66,6 +67,10 @@ TOOL_INTENTS = (
     (("optimization", "optimize", "reduce annual electricity"), {"run_energyplus_optimization", "get_energyplus_study_job"}),
     (("sensitivity", "parameter screening"), {"run_energyplus_sensitivity", "get_energyplus_study_job"}),
     (("study job", "optimization job", "sensitivity job"), {"get_energyplus_study_job"}),
+    (("tool count", "tools available", "available tools", "tool inventory", "registered tools"), {"list_registered_tools"}),
+    (("agent count", "agents available", "agent team", "agent permission"), {"describe_agent_team"}),
+    (("platform capability", "system capability", "workflow mode", "limitation", "self awareness"), {"get_platform_capabilities"}),
+    (("artifact location", "output location", "where saved", "storage location"), {"explain_artifact_locations"}),
     (("demo", "surrogate"), {"run_surrogate_optimization_demo", "run_surrogate_calibration_demo", "run_surrogate_sensitivity_demo"}),
 )
 
@@ -80,7 +85,7 @@ class Specialist:
 
 SPECIALISTS = {
     "planner": Specialist("planner", "Planning Agent", "Turn complex goals into measurable steps and dependencies.", set()),
-    "model_analyst": Specialist("model_analyst", "Model Analyst", "Inspect IDF structure, loads, schedules, envelope and HVAC without modifying files.", READ_TOOLS),
+    "model_analyst": Specialist("model_analyst", "Model Analyst", "Inspect IDF structure, platform registry, loads, schedules, envelope and HVAC without modifying files.", READ_TOOLS | AWARENESS_TOOLS),
     "retrofit_engineer": Specialist("retrofit_engineer", "Retrofit Engineer", "Create safe derived model changes; never overwrite an original model.", READ_TOOLS | WRITE_TOOLS),
     "simulation_engineer": Specialist("simulation_engineer", "Simulation Engineer", "Configure and run EnergyPlus simulations and diagnose run failures.", READ_TOOLS | SIM_TOOLS | ADMIN_TOOLS),
     "results_analyst": Specialist("results_analyst", "Results Analyst", "Interpret simulation artifacts, compare alternatives and generate visual results.", READ_TOOLS | RESULT_TOOLS),
